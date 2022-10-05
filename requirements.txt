@@ -1,0 +1,8 @@
+Flask
+Flask-Core
+Flask-RESTful
+psycopg2-binary
+flask_sqlalchemy
+requests
+requests-xml
+ariadne

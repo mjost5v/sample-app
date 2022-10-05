@@ -1,0 +1,40 @@
+schema {
+    query: Query
+    mutation: Mutation
+}
+
+type Employee {
+    id: ID!
+    employeeId: Int!
+    name: String!
+    age: Int!
+    position: String!
+}
+
+type EmployeeResult {
+    success: Boolean
+    errors: [String]
+    employee: Employee
+}
+
+type EmployeeListResult {
+    success: Boolean
+    errors: [String]
+    employees: [Employee]
+}
+
+type Query {
+    employee(id: ID!): EmployeeResult!
+    employees: EmployeeListResult!
+}
+
+type DeleteEmployeeResult {
+    success: Boolean!
+    errors: [String]
+}
+
+type Mutation {
+    createEmployee(employeeId: Int!, name: String!, age: Int!, position: String!): EmployeeResult!
+    deleteEmployee(id: ID!): DeleteEmployeeResult!
+    updateEmployee(id: ID!, employeeId: Int, name: String, age: Int, position: String): EmployeeResult!
+}
