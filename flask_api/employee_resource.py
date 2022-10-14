@@ -1,112 +1,123 @@
-from flask_restful import Resource, abort, reqparse
+from marshmallow import Schema, fields, validate, ValidationError
 from sqlalchemy.exc import IntegrityError
 from flask_api.models import EmployeeModel, db
+from flask import Blueprint, abort, request, jsonify
 
-parser = reqparse.RequestParser(bundle_errors=True)
-parser.add_argument('employee_id', type=int, help='Employee id: {error_msg}', required=True)
-parser.add_argument('name', type=str, help='Employee name: {error_msg}}', required=True)
-parser.add_argument('age', type=int, help='Employee age: {error_msg}', required=True)
-parser.add_argument('position', type=str, help='position: {error_msg}', required=True)
+employee_resource = Blueprint('employee_resource', __name__)
 
-list_parser = reqparse.RequestParser()
-list_parser.add_argument('page_size', type=int,  choices=(25, 50, 100), help='page_size: {error_msg}', location='args')
-list_parser.add_argument('page_number', type=int, help='page_number: {error_msg}', location='args')
+class EmployeeSchema(Schema):
+    employee_id = fields.Integer(required=True)
+    name = fields.String(required=True, validate=validate.Length(min=1))
+    age = fields.Integer(required=True, validate=validate.Range(min=0))
+    position = fields.String(required=True, validate=validate.Length(min=1))
 
-patch_parser = reqparse.RequestParser(bundle_errors=True)
-patch_parser.add_argument('employee_id', type=int, help='Employee id: {error_msg}', required=False)
-patch_parser.add_argument('name', type=str, help='Employee name: {error_msg}}', required=False)
-patch_parser.add_argument('age', type=int, help='Employee age: {error_msg}', required=False)
-patch_parser.add_argument('position', type=str, help='position: {error_msg}', required=False)
+class ListSchema(Schema):
+    page_size = fields.Integer(validate=validate.OneOf([25, 50, 100]), missing=25)
+    page_number = fields.Integer(missing=1)
 
+@employee_resource.route('/', methods=['GET'])
+def list_employees():
+    try:
+        data = ListSchema().load(request.args)
+        pagination = EmployeeModel.query.paginate(data['page_number'], data['page_size'], False)
+        items = [employee.to_json() for employee in pagination.items]
+        return {
+                'page': pagination.page,
+                'page_size': pagination.per_page,
+                'total': pagination.total,
+                'results': items
+               }, 200
+    except ValidationError as e:
+        return e.normalized_messages(), 400
+    except Exception:
+        return "Unable to get employees", 500
 
-class EmployeeResourceList(Resource):
-    def get(self):
-        args = list_parser.parse_args()
-        if args['page_number'] is None or args['page_number'] < 1:
-            page_number = 1
-        else:
-            page_number = args['page_number']
-        page_size = 25 if args['page_size'] is None else args['page_size']
-        try:
-            pagination = EmployeeModel.query.paginate(page_number, page_size, False)
-            items = [employee.to_json() for employee in pagination.items]
-            return {
-                    'page': pagination.page,
-                    'page_size': pagination.per_page,
-                    'total': pagination.total,
-                    'results': items
-                   }, 200
-        except Exception:
-            abort(500, message="Unable to get employees")
+@employee_resource.route('/', methods=['POST'])
+def create_new_employee():
+    try:
+        data = EmployeeSchema().load(request.json)
+        employee = EmployeeModel(**data)
+    except ValidationError as e:
+        return e.normalized_messages(), 400
 
-    def post(self):
-        args = parser.parse_args()
-        employee = EmployeeModel(**args)
-        try:
-            db.session.add(employee)
-            db.session.commit()
-            return employee.to_json(), 200
-        except IntegrityError:
-            abort(400, message=f"employee_id {args['employee_id']} already in use")
-        except Exception:
-            abort(500, messsage=f"Unable to save employee: {employee}")
+    try:
+        db.session.add(employee)
+        db.session.commit()
+        return employee.to_json(), 200
+    except IntegrityError:
+        return f"employee_id {data['employee_id']} already in use", 400
+    except Exception:
+        return "Unable to save employee: {employee}", 500
 
 
-class EmployeeResource(Resource):
-    def get(self, employee_id):
-        try:
-            employee = EmployeeModel.query.get(employee_id)
-            return employee.to_json()
-        except AttributeError:
-            abort(404, message=f"Employee {employee_id} does not exist")
-        except Exception:
-            abort(500, message=f"Unable to get employee")
+@employee_resource.route('/<int:employee_id>', methods=['GET'])
+def read_employee(employee_id):
+    try:
+        employee = EmployeeModel.query.get(employee_id)
+        return employee.to_json()
+    except AttributeError:
+        return f"Employee {employee_id} does not exist", 400
+    except Exception:
+        return f"Unable to get employee", 500
 
-    def delete(self, employee_id):
-        try:
-            employee = EmployeeModel.query.get(employee_id)
-            db.session.delete(employee)
-            db.session.commit()
-            return f"Employee {employee_id} deleted", 200
-        except AttributeError:
-            abort(404, message=f"Employee {employee_id} does not exist")
-        except Exception:
-            abort(500, message=f"Unable to delete employe: {employee_id}")
 
-    def put(self, employee_id):
-        args = parser.parse_args()
-        try:
-            employee = EmployeeModel.query.get(employee_id)
+@employee_resource.route('/<int:employee_id>', methods=['DELETE'])
+def delete_employee(employee_id):
+    try:
+        employee = EmployeeModel.query.get(employee_id)
+        db.session.delete(employee)
+        db.session.commit()
+        return f"Employee {employee_id} deleted", 200
+    except AttributeError:
+        return "Employee {employee_id} does not exist", 400
+    except Exception:
+        return f"Unable to delete employee: {employee_id}", 500
 
-            employee.employee_id = args['employee_id']
-            employee.name = args['name']
-            employee.age = args['age']
-            employee.position = args['position']
-            db.session.add(employee)
-            db.session.commit()
-            return employee.to_json(), 200
-        except AttributeError:
-            abort(404, message=f"Employee {employee_id} does not exist")
-        except Exception:
-            abort(500, message=f"Unable to update employee: {employee_id}")
 
-    def patch(self, employee_id):
-        args = parser.parse_args()
-        try:
-            employee = EmployeeModel.query.get(employee_id)
-            if 'employee_id' in args:
-                employee.employee_id = args['employee_id']
-            if 'name' in args:
-                employee.name = args['name']
-            if 'age' in args:
-                employee.age = args['age']
-            if 'position' in args:
-                employee.position = args['position']
-            db.session.add(employee)
-            db.session.commit()
-            return employee.to_json(), 200
-        except AttributeError:
-            abort(404, message=f"Employee {employee_id} does not exist")
-        except Exception:
-            abort(500, message=f"Unable to update employee: {employee_id}")
+@employee_resource.route('/<int:employee_id>', methods=['PUT'])
+def update_employee(employee_id):
+    data_employee_id = None
+    try:
+        data = EmployeeSchema().load(request.json)
+        data_employee_id = data['employee_id']
+        employee = EmployeeModel.query.get(employee_id)
+        employee.employee_id = data_employee_id
+        employee.name = data['name']
+        employee.age = data['age']
+        employee.position = data['position']
+        db.session.add(employee)
+        db.session.commit()
+        return employee.to_json(), 200
+    except ValidationError as e:
+        return e.normalized_messages(), 400
+    except AttributeError:
+        return f"Employee {employee_id} does not exist", 400
+    except IntegrityError:
+        return f"employee_id: {data_employee_id} is already in use"
+    except Exception as e:
+        return f"Unable to update employee: {employee_id}", 500
+
+
+@employee_resource.route('/<int:employee_id>', methods=['PATCH'])
+def patch_employee(employee_id):
+    try:
+        data = EmployeeSchema().load(request.json, partial=True)
+        employee = EmployeeModel.query.get(employee_id)
+        if 'employee_id' in data:
+            employee.employee_id = data['employee_id']
+        if 'name' in data:
+            employee.name = data['name']
+        if 'age' in data:
+            employee.age = data['age']
+        if 'position' in data:
+            employee.position = data['position']
+        db.session.add(employee)
+        db.session.commit()
+        return employee.to_json(), 200
+    except ValidationError as e:
+        return e.normalized_messages(), 400
+    except AttributeError:
+        abort(404, {"message": "Employee {employee_id} does not exist"})
+    except Exception:
+        abort(500, {"message": f"Unable to update employee: {employee_id}"})
 

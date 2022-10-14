@@ -1,6 +1,12 @@
 from models import EmployeeModel, db
-from ariadne import convert_kwargs_to_snake_case
+from ariadne import graphql_sync, convert_kwargs_to_snake_case, ObjectType, load_schema_from_path, make_executable_schema, snake_case_fallback_resolvers
+from ariadne.constants import PLAYGROUND_HTML
 from sqlalchemy.exc import IntegrityError
+from flask import Blueprint, request, jsonify
+
+graphql_queries = Blueprint('graphql', __name__)
+
+
 
 def list_employees(obj, info):
     try:
@@ -36,6 +42,7 @@ def get_employee(obj, info, id):
             'errors': [str(e)]
         }
 
+
 @convert_kwargs_to_snake_case
 def create_employee(obj, info, employee_id, name, age, position):
     employee = EmployeeModel(employee_id, name, age, position)
@@ -56,6 +63,7 @@ def create_employee(obj, info, employee_id, name, age, position):
             'success': False,
             'errors': [str(e)]
         }
+
 
 @convert_kwargs_to_snake_case
 def update_employee(obj, info, id, employee_id=None, name=None, age=None, position=None):
@@ -87,6 +95,7 @@ def update_employee(obj, info, id, employee_id=None, name=None, age=None, positi
             'errors': [str(e)]
         }
 
+
 @convert_kwargs_to_snake_case
 def delete_employee(obj, info, id):
     try:
@@ -106,3 +115,27 @@ def delete_employee(obj, info, id):
            'success': False,
            'errors': [str(e)]
        }
+
+query = ObjectType('Query')
+query.set_field('employees', list_employees)
+query.set_field('employee', get_employee)
+
+mutation = ObjectType('Mutation')
+mutation.set_field('createEmployee', create_employee)
+mutation.set_field('updateEmployee', update_employee)
+mutation.set_field('deleteEmployee', delete_employee)
+
+type_defs = load_schema_from_path('schema.graphql')
+schema = make_executable_schema(type_defs, query, mutation, snake_case_fallback_resolvers)
+
+@graphql_queries.route('/', methods=['GET'])
+def playground():
+    return PLAYGROUND_HTML, 200
+
+
+@graphql_queries.route('/', methods=['POST'])
+def server():
+    data = request.get_json()
+    success, result = graphql_sync(schema, data, context_value=request)
+    status_code = 200 if success else 400
+    return jsonify(result), status_code

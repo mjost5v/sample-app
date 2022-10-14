@@ -1,6 +1,9 @@
 Flask
 Flask-Core
-Flask-RESTful
+flask-marshmallow
+Flask-HTTPAuth
+Flask-Dance
+marshmallow-sqlalchemy
 psycopg2-binary
 flask_sqlalchemy
 requests
